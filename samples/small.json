@@ -1,0 +1,51 @@
+{
+  "_id": "5db4c6b72e6794bbd38c45cc",
+  "index": 0,
+  "guid": "75d42b3e-c5d8-436a-ac63-e6bf5278f28f",
+  "isActive": true,
+  "balance": "$1,594.66",
+  "picture": "http://placehold.it/32x32",
+  "age": 20,
+  "eyeColor": "blue",
+  "name": "Sullivan Sosa",
+  "gender": "male",
+  "company": "ZOUNDS",
+  "email": "sullivansosa@zounds.com",
+  "phone": "+1 (801) 449-3340",
+  "address": "299 Chapel Street, Roulette, Louisiana, 4867",
+  "about": "Magna esse exercitation proident cupidatat eu proident adipisicing magna excepteur duis laborum aute nostrud. Non do commodo Lorem in reprehenderit aliqua exercitation duis minim eu. Occaecat sint ullamco ullamco aliqua labore labore ad enim.\r\n",
+  "registered": "2014-05-10T09:44:07 +06:00",
+  "latitude": -16.208672,
+  "longitude": 32.057674,
+  "tags": [
+    "ipsum",
+    "excepteur",
+    "cillum",
+    "ut",
+    "nisi",
+    "nostrud",
+    "fugiat"
+  ],
+  "friends": [
+    {
+      "id": 0,
+      "name": "Gallagher Travis"
+    },
+    {
+      "id": 1,
+      "name": "Guy Mercado"
+    },
+    {
+      "id": 2,
+      "name": "Lakisha West"
+    }
+  ],
+  "greeting": "Hello, Sullivan Sosa! You have 10 unread messages.",
+  "favoriteFruit": "strawberry",
+  "nested": {
+    "subItem": [],
+    "child": {
+      "subArr": []
+    }
+  }
+}
