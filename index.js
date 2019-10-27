@@ -1,4 +1,4 @@
-const myCleaner = require('./module');
+const fastCleaner = require('fast-clean');
 const deepClean = require('clean-deep');
 const cleaner = require('deep-cleaner');
 const fs = require('fs');
@@ -26,7 +26,7 @@ files.forEach(fileName => {
 
   console.log("using my new cleaner");
   const pT1 = performance.now();
-  myCleaner.clean(objToClean, { nullCleaner: true });
+  fastCleaner.clean(objToClean, { nullCleaner: true });
   const pT2 = performance.now()
   console.log(`Used ~ ${pT2 - pT1} ms`);
 
