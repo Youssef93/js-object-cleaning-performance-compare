@@ -1,0 +1,25 @@
+{
+  "name": "js-object-cleaning-performance-compare",
+  "version": "1.0.0",
+  "description": "This repo is to measure performance of different Javascript cleaning libraries.",
+  "main": "index.js",
+  "scripts": {
+    "comparison": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Youssef93/js-object-cleaning-performance-compare.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Youssef93/js-object-cleaning-performance-compare/issues"
+  },
+  "homepage": "https://github.com/Youssef93/js-object-cleaning-performance-compare#readme",
+  "dependencies": {
+    "clean-deep": "^3.4.0",
+    "deep-cleaner": "^2.0.0-alpha.3",
+    "fast-clean": "^1.5.2",
+    "perf_hooks": "^0.0.1"
+  }
+}

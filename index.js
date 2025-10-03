@@ -13,7 +13,7 @@ files.forEach(fileName => {
 
   console.log("using deep-cleaner");
   const deepCleanerT1 = performance.now();
-  cleaner(objToClean);
+  cleaner.clean(objToClean);
   const deepCleanerT2 = performance.now()
   console.log(`Used ~ ${deepCleanerT2 - deepCleanerT1} ms \n`);
 
@@ -22,7 +22,6 @@ files.forEach(fileName => {
   deepClean(objToClean);
   const cleanDeepT2 = performance.now()
   console.log(`Used ~ ${cleanDeepT2 - cleanDeepT1} ms \n`);
-
 
   console.log("using my new cleaner");
   const pT1 = performance.now();
