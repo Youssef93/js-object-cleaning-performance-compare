@@ -4,7 +4,8 @@
   "description": "This repo is to measure performance of different Javascript cleaning libraries.",
   "main": "index.js",
   "scripts": {
-    "comparison": "node index.js"
+    "comparison": "node --expose-gc index.js",
+    "old-version-comparison": "node old-version-compare.js"
   },
   "repository": {
     "type": "git",
@@ -20,6 +21,7 @@
     "clean-deep": "^3.4.0",
     "deep-cleaner": "^2.0.0-alpha.3",
     "fast-clean": "^1.5.2",
-    "perf_hooks": "^0.0.1"
+    "fast-clean-1.4.0": "npm:fast-clean@^1.4.0",
+    "fast-clean-1.5.2": "npm:fast-clean@^1.5.2"
   }
 }
