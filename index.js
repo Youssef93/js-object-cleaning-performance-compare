@@ -1,9 +1,10 @@
 // benchmark-multi-cleaners.js
-// Run: node [--expose-gc] benchmark-multi-cleaners.js
+// Run: node --expose-gc benchmark-multi-cleaners.js   (for best memory accuracy)
 
 const fastCleaner = require('fast-clean');       // fastCleaner.clean(obj, { nullCleaner: true })
 const deepClean = require('clean-deep');         // deepClean(obj)
 const deepCleaner = require('deep-cleaner');     // deepCleaner.clean(obj)
+const _ = require('lodash');
 
 const fs = require('fs');
 const path = require('path');
@@ -33,6 +34,7 @@ const shuffle = (arr) => {
   }
   return a;
 };
+const bytes = (n) => `${(n / 1024 / 1024).toFixed(2)} MB`;
 function printHeader(title) {
   const line = '─'.repeat(Math.max(10, title.length + 4));
   console.log(`\n${line}\n  ${title}\n${line}`);
@@ -43,41 +45,78 @@ function timeOne(fn) {
   const t2 = hrNow();
   return hrDiffMs(t1, t2);
 }
+function memNow() {
+  const { heapUsed, rss } = process.memoryUsage();
+  return { heapUsed, rss };
+}
+
+/**
+ * Benchmarks a function and also records memory:
+ * - peakHeap: max heapUsed observed during measured iterations
+ * - avgHeapDelta: average (heapUsed_after_iter - heapUsed_before_iter)
+ * - peakRSS: max rss observed
+ */
 function runBench(name, fn, iters = MEASURE_ITERS, warmup = WARMUP_ITERS) {
   // Warmup
   for (let i = 0; i < warmup; i++) timeOne(fn);
 
-  // Measure
+  // If GC available, stabilize before measuring
+  if (USE_GC) global.gc();
+
   const samples = new Array(iters);
+  const heapDeltas = new Array(iters);
+  let peakHeap = memNow().heapUsed;
+  let peakRSS = memNow().rss;
+
   for (let i = 0; i < iters; i++) {
-    if (USE_GC && i % 10 === 0) global.gc();
+    // pre-sample (after opportunistic GC)
+    if (USE_GC) global.gc();
+    const pre = memNow();
+
     samples[i] = timeOne(fn);
+
+    // post-sample
+    const post = memNow();
+
+    // track deltas & peaks (without GC to capture transient growth)
+    const delta = Math.max(0, post.heapUsed - pre.heapUsed);
+    heapDeltas[i] = delta;
+    if (post.heapUsed > peakHeap) peakHeap = post.heapUsed;
+    if (post.rss > peakRSS) peakRSS = post.rss;
+
+    // every few iters, try to release
+    if (USE_GC && (i + 1) % 3 === 0) global.gc();
   }
 
-  // Stats
+  // Timing stats
   const min = Math.min(...samples);
   const max = Math.max(...samples);
   const sum = samples.reduce((a, b) => a + b, 0);
   const mean = sum / samples.length;
   const med = median(samples);
 
-  return { name, samples, min, median: med, mean, max };
+  // Memory stats
+  const avgHeapDelta = heapDeltas.reduce((a, b) => a + b, 0) / heapDeltas.length;
+
+  return {
+    name,
+    samples,
+    min,
+    median: med,
+    mean,
+    max,
+    // memory:
+    peakHeap,
+    avgHeapDelta,
+    peakRSS,
+  };
 }
 
 // ─── Define contenders (wrap to normalize APIs) ────────────────────────────────
 const contenders = [
-  {
-    name: 'deep-cleaner',
-    run: (obj) => deepCleaner.clean(obj),
-  },
-  {
-    name: 'clean-deep',
-    run: (obj) => deepClean(obj),
-  },
-  {
-    name: 'fast-clean (nullCleaner=true)',
-    run: (obj) => fastCleaner.clean(obj, { nullCleaner: true }),
-  },
+  { name: 'deep-cleaner', run: (obj) => deepCleaner.clean(obj) },
+  { name: 'clean-deep', run: (obj) => deepClean(obj) },
+  { name: 'fast-clean (nullCleaner=true)', run: (obj) => fastCleaner.clean(obj, { nullCleaner: true, cleanInPlace: true }) },
 ];
 
 // ─── Load samples ──────────────────────────────────────────────────────────────
@@ -102,10 +141,10 @@ for (const fileName of files) {
 
   const results = order.map(({ name, run }) => {
     if (USE_GC) global.gc();
-    return runBench(name, () => run(objToClean));
+    return runBench(name, () => run(_.cloneDeep(objToClean)));
   });
 
-  // Print table
+  // Print table with timing + memory
   const table = results.map(r => ({
     Cleaner: r.name,
     min: fmtMs(r.min),
@@ -113,10 +152,13 @@ for (const fileName of files) {
     mean: fmtMs(r.mean),
     max: fmtMs(r.max),
     'ops/sec': opsPerSec(r.mean).toFixed(1),
+    'peak heap': bytes(r.peakHeap),
+    'avg heap Δ': bytes(r.avgHeapDelta),
+    'peak RSS': bytes(r.peakRSS),
   }));
   console.table(table);
 
-  // Rank & winner line
+  // Rank & winner line (by mean time)
   const ranked = [...results].sort((a, b) => a.mean - b.mean);
   const winner = ranked[0];
   const runnerUp = ranked[1];
@@ -129,7 +171,13 @@ for (const fileName of files) {
 
   perFileResults.push({
     file: fileName,
-    rows: results.map(r => ({ name: r.name, mean: r.mean })),
+    rows: results.map(r => ({
+      name: r.name,
+      mean: r.mean,
+      peakHeap: r.peakHeap,
+      avgHeapDelta: r.avgHeapDelta,
+      peakRSS: r.peakRSS,
+    })),
     winner: winner.name,
   });
 }
@@ -138,29 +186,39 @@ for (const fileName of files) {
 printHeader('Overall Summary');
 
 const cleanerNames = contenders.map(c => c.name);
-const overallAgg = Object.fromEntries(cleanerNames.map(n => [n, 0]));
+const agg = Object.fromEntries(
+  cleanerNames.map(n => [n, { timeSum: 0, heapPeakMax: 0, heapDeltaSum: 0, rssPeakMax: 0 }])
+);
 const winCounts = Object.fromEntries(cleanerNames.map(n => [n, 0]));
 
 for (const r of perFileResults) {
   for (const row of r.rows) {
-    overallAgg[row.name] += row.mean;
+    const a = agg[row.name];
+    a.timeSum += row.mean;
+    a.heapPeakMax = Math.max(a.heapPeakMax, row.peakHeap);
+    a.heapDeltaSum += row.avgHeapDelta;
+    a.rssPeakMax = Math.max(a.rssPeakMax, row.peakRSS);
   }
   winCounts[r.winner] += 1;
 }
 
 const overallRows = cleanerNames.map(name => {
-  const avgOfMeans = overallAgg[name] / perFileResults.length;
+  const a = agg[name];
+  const avgOfMeans = a.timeSum / perFileResults.length;
+  const avgHeapDelta = a.heapDeltaSum / perFileResults.length;
   return {
     Cleaner: name,
     'overall mean': fmtMs(avgOfMeans),
     'ops/sec': opsPerSec(avgOfMeans).toFixed(1),
     Wins: winCounts[name],
+    'max peak heap': bytes(a.heapPeakMax),
+    'avg heap Δ': bytes(avgHeapDelta),
+    'max peak RSS': bytes(a.rssPeakMax),
   };
-}).sort((a, b) => {
-  // sort by overall mean ascending
-  const aMs = Number(a['overall mean'].replace(' ms', ''));
-  const bMs = Number(b['overall mean'].replace(' ms', ''));
-  return aMs - bMs;
+}).sort((x, y) => {
+  const ax = Number(x['overall mean'].replace(' ms', ''));
+  const ay = Number(y['overall mean'].replace(' ms', ''));
+  return ax - ay;
 });
 
 console.table(overallRows);
