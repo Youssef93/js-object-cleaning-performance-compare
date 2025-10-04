@@ -112,11 +112,20 @@ function runBench(name, fn, iters = MEASURE_ITERS, warmup = WARMUP_ITERS) {
   };
 }
 
-// ─── Define contenders (wrap to normalize APIs) ────────────────────────────────
+// ─── Normalize array behavior so all libs clean elements ───────────────────────
+const normalizeArray = (fn) => (input) => {
+  if (Array.isArray(input)) {
+    // Clean each element. Clone isolation happens in the caller before this runs.
+    return input.map((x) => fn(x));
+  }
+  return fn(input);
+};
+
+// ─── Define contenders (wrap to normalize APIs & array semantics) ─────────────
 const contenders = [
-  { name: 'deep-cleaner', run: (obj) => deepCleaner.clean(obj) },
-  { name: 'clean-deep', run: (obj) => deepClean(obj) },
-  { name: 'fast-clean (nullCleaner=true)', run: (obj) => fastCleaner.clean(obj, { nullCleaner: true, cleanInPlace: true }) },
+  { name: 'deep-cleaner', run: normalizeArray((obj) => deepCleaner.clean(obj)) },
+  { name: 'clean-deep', run: normalizeArray((obj) => deepClean(obj)) },
+  { name: 'fast-clean (nullCleaner=true)', run: normalizeArray((obj) => fastCleaner.clean(obj, { nullCleaner: true, cleanInPlace: true })) },
 ];
 
 // ─── Load samples ──────────────────────────────────────────────────────────────
@@ -138,6 +147,10 @@ for (const fileName of files) {
 
   // Randomize order per file to minimize thermal/adjacency bias
   const order = shuffle(contenders);
+
+  // Baseline: clone-only for this input
+  const cloneOnly = runBench('clone-only', () => _.cloneDeep(objToClean));
+  console.log(`Clone-only mean for ${fileName}: ${fmtMs(cloneOnly.mean)}`);
 
   const results = order.map(({ name, run }) => {
     if (USE_GC) global.gc();
@@ -180,6 +193,67 @@ for (const fileName of files) {
     })),
     winner: winner.name,
   });
+
+  // ─── Extra test: large array of 100,000 elements (only for small.json) ──────
+  if (fileName === 'small.json') {
+    printHeader(`Benchmark: ${fileName} × 100,000 array`);
+    const BIG_N = 100_000;
+
+    // Ensure there's actual removable work per element.
+    const objToCleanWithNull = { ...objToClean, _tmpShouldGo: null };
+
+    // Build a big array of 100k entries referencing the same base object.
+    // (Each measured iteration deep-clones the array, so cleaners operate
+    //  on a fully independent structure every time.)
+    const bigArray = Array.from({ length: BIG_N }, () => objToCleanWithNull);
+
+    // Baseline: clone-only for the big array
+    const cloneOnlyBig = runBench('clone-only (×100k)', () => _.cloneDeep(bigArray));
+    console.log(`Clone-only mean for ${fileName} × ${BIG_N}: ${fmtMs(cloneOnlyBig.mean)}`);
+
+    const arrayResults = order.map(({ name, run }) => {
+      if (USE_GC) global.gc();
+      return runBench(name, () => run(_.cloneDeep(bigArray)));
+    });
+
+    // Print timing + memory table for the array test
+    const arrayTable = arrayResults.map(r => ({
+      Cleaner: r.name,
+      min: fmtMs(r.min),
+      median: fmtMs(r.median),
+      mean: fmtMs(r.mean),
+      max: fmtMs(r.max),
+      'ops/sec': opsPerSec(r.mean).toFixed(1),
+      'peak heap': bytes(r.peakHeap),
+      'avg heap Δ': bytes(r.avgHeapDelta),
+      'peak RSS': bytes(r.peakRSS),
+    }));
+    console.table(arrayTable);
+
+    // Rank & winner line (by mean time)
+    const rankedArray = [...arrayResults].sort((a, b) => a.mean - b.mean);
+    const winnerArray = rankedArray[0];
+    const runnerUpArray = rankedArray[1];
+    const speedupPctArray = ((runnerUpArray.mean - winnerArray.mean) / runnerUpArray.mean) * 100;
+
+    console.log(
+      `Fastest for ${fileName} × ${BIG_N}: ${winnerArray.name} (${fmtMs(winnerArray.mean)} avg) ` +
+      `→ ${fmtPct(speedupPctArray)} vs next best (${runnerUpArray.name})`
+    );
+
+    // Include in overall aggregation as a separate "file"
+    perFileResults.push({
+      file: `${fileName} (×${BIG_N})`,
+      rows: arrayResults.map(r => ({
+        name: r.name,
+        mean: r.mean,
+        peakHeap: r.peakHeap,
+        avgHeapDelta: r.avgHeapDelta,
+        peakRSS: r.peakRSS,
+      })),
+      winner: winnerArray.name,
+    });
+  }
 }
 
 // ─── Overall Summary ───────────────────────────────────────────────────────────
