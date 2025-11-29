@@ -115,7 +115,6 @@ function runBench(name, fn, iters = MEASURE_ITERS, warmup = WARMUP_ITERS) {
 // ─── Normalize array behavior so all libs clean elements ───────────────────────
 const normalizeArray = (fn) => (input) => {
   if (Array.isArray(input)) {
-    // Clean each element. Clone isolation happens in the caller before this runs.
     return input.map((x) => fn(x));
   }
   return fn(input);
@@ -140,6 +139,8 @@ console.log(`Samples dir: ${SAMPLES_DIR}`);
 const perFileResults = [];
 
 for (const fileName of files) {
+  // Uncomment to skip big.json (slow on one of the modules)
+  // if(fileName === 'big.json') continue;
   const filePath = path.join(SAMPLES_DIR, fileName);
   const objToClean = require(filePath);
 
@@ -203,8 +204,6 @@ for (const fileName of files) {
     const objToCleanWithNull = { ...objToClean, _tmpShouldGo: null };
 
     // Build a big array of 100k entries referencing the same base object.
-    // (Each measured iteration deep-clones the array, so cleaners operate
-    //  on a fully independent structure every time.)
     const bigArray = Array.from({ length: BIG_N }, () => objToCleanWithNull);
 
     // Baseline: clone-only for the big array
@@ -263,7 +262,6 @@ const cleanerNames = contenders.map(c => c.name);
 const agg = Object.fromEntries(
   cleanerNames.map(n => [n, { timeSum: 0, heapPeakMax: 0, heapDeltaSum: 0, rssPeakMax: 0 }])
 );
-const winCounts = Object.fromEntries(cleanerNames.map(n => [n, 0]));
 
 for (const r of perFileResults) {
   for (const row of r.rows) {
@@ -273,38 +271,76 @@ for (const r of perFileResults) {
     a.heapDeltaSum += row.avgHeapDelta;
     a.rssPeakMax = Math.max(a.rssPeakMax, row.peakRSS);
   }
-  winCounts[r.winner] += 1;
 }
 
-const overallRows = cleanerNames.map(name => {
+// Build display + numeric views
+const overallNumeric = cleanerNames.map(name => {
   const a = agg[name];
   const avgOfMeans = a.timeSum / perFileResults.length;
   const avgHeapDelta = a.heapDeltaSum / perFileResults.length;
   return {
-    Cleaner: name,
-    'overall mean': fmtMs(avgOfMeans),
-    'ops/sec': opsPerSec(avgOfMeans).toFixed(1),
-    Wins: winCounts[name],
-    'max peak heap': bytes(a.heapPeakMax),
-    'avg heap Δ': bytes(avgHeapDelta),
-    'max peak RSS': bytes(a.rssPeakMax),
+    name,
+    avgOfMeans,          // ms
+    avgHeapDelta,        // bytes
+    heapPeakMax: a.heapPeakMax,  // bytes
+    rssPeakMax: a.rssPeakMax,    // bytes
   };
-}).sort((x, y) => {
-  const ax = Number(x['overall mean'].replace(' ms', ''));
-  const ay = Number(y['overall mean'].replace(' ms', ''));
-  return ax - ay;
 });
+
+// Console table for speed-focused view
+const overallRows = overallNumeric
+  .map(s => ({
+    Cleaner: s.name,
+    'overall mean': fmtMs(s.avgOfMeans),
+    'ops/sec': opsPerSec(s.avgOfMeans).toFixed(1),
+    'max peak heap': bytes(s.heapPeakMax),
+    'avg heap Δ': bytes(s.avgHeapDelta),
+    'max peak RSS': bytes(s.rssPeakMax),
+  }))
+  .sort((x, y) => {
+    const ax = Number(x['overall mean'].replace(' ms', ''));
+    const ay = Number(y['overall mean'].replace(' ms', ''));
+    return ax - ay;
+  });
 
 console.table(overallRows);
 
-// Winner line
-const winnerOverall = overallRows[0];
-const runnerOverall = overallRows[1];
-const wMs = Number(winnerOverall['overall mean'].replace(' ms', ''));
-const rMs = Number(runnerOverall['overall mean'].replace(' ms', ''));
-const overallSpeedupPct = ((rMs - wMs) / rMs) * 100;
+// ─── Overall Winner (Speed) ───────────────────────────────────────────────────
+const speedSorted = [...overallNumeric].sort((a, b) => a.avgOfMeans - b.avgOfMeans);
+const winnerSpeed = speedSorted[0];
+const runnerSpeed = speedSorted[1];
+const overallSpeedupPct = ((runnerSpeed.avgOfMeans - winnerSpeed.avgOfMeans) / runnerSpeed.avgOfMeans) * 100;
 
 console.log(
-  `Winner (overall across ${perFileResults.length} files): ${winnerOverall.Cleaner} ` +
+  `Overall winner (speed) across ${perFileResults.length} files: ${winnerSpeed.name} ` +
   `→ ${fmtPct(overallSpeedupPct)} vs next best`
+);
+
+// ─── Overall Winner (Memory Efficiency) ───────────────────────────────────────
+// Primary metric: smallest average heap Δ (bytes allocated per run).
+// Tie-breakers: smaller max peak heap, then smaller max peak RSS.
+const EPS = 1; // 1 byte tolerance for floating differences
+
+const memSorted = [...overallNumeric].sort((a, b) => {
+  if (Math.abs(a.avgHeapDelta - b.avgHeapDelta) > EPS) {
+    return a.avgHeapDelta - b.avgHeapDelta;
+  }
+  if (a.heapPeakMax !== b.heapPeakMax) return a.heapPeakMax - b.heapPeakMax;
+  return a.rssPeakMax - b.rssPeakMax;
+});
+
+const winnerMemory = memSorted[0];
+
+// Optional: show a compact memory-focused table for clarity
+const memoryRows = memSorted.map(s => ({
+  Cleaner: s.name,
+  'avg heap Δ (mean)': bytes(s.avgHeapDelta),
+  'max peak heap': bytes(s.heapPeakMax),
+  'max peak RSS': bytes(s.rssPeakMax),
+}));
+console.table(memoryRows);
+
+console.log(
+  `Overall winner (memory efficiency): ${winnerMemory.name} ` +
+  `(lowest avg heap Δ; tie-breakers: peak heap, then peak RSS)`
 );
