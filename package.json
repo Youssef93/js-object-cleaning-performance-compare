@@ -21,6 +21,6 @@
     "clean-deep": "^3.4.0",
     "deep-cleaner": "^2.0.0-alpha.3",
     "fast-clean": "^1.5.2",
-    "lodash": "^4.17.21"
+    "lodash": "^4.18.1"
   }
 }
